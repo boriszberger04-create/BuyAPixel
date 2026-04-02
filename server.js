@@ -12,11 +12,11 @@ if (!fs.existsSync(FILE)) {
 }
 
 function loadPixels() {
-    return JSON.parse(fs.readFileSync(FILE));
+    return JSON.parse(fs.readFileSync(FILE, "utf8"));
 }
 
 function savePixels(data) {
-    fs.writeFileSync(FILE, JSON.stringify(data));
+    fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
 app.get("/pixels", (req, res) => {
@@ -24,18 +24,27 @@ app.get("/pixels", (req, res) => {
 });
 
 app.post("/buy", (req, res) => {
-    const { x, y, link } = req.body;
+    const { x, y, link, color } = req.body;
     const data = loadPixels();
     const key = `${x},${y}`;
 
-    if (data[key]) {
-        return res.status(400).json({ error: "Already taken" });
+    if (
+        typeof x !== "number" ||
+        typeof y !== "number" ||
+        !link ||
+        !color
+    ) {
+        return res.status(400).json({ error: "Missing data" });
     }
 
-    data[key] = { link };
+    if (data[key]) {
+        return res.status(400).json({ error: "Pixel already taken" });
+    }
+
+    data[key] = { link, color };
     savePixels(data);
 
     res.json({ success: true });
 });
 
-app.listen(3000, () => console.log("Server running"));
+app.listen(3000, () => console.log("Server running on port 3000"));
