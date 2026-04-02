@@ -1,66 +1,375 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Buy a Pixel</title>
+
 <style>
-body {
-  background: #111;
-  color: white;
-  text-align: center;
-  font-family: Arial;
-}
-canvas {
-  image-rendering: pixelated;
-  cursor: crosshair;
-}
+  body {
+    margin: 0;
+    background: #111;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 20px 0 8px;
+  }
+
+  p {
+    margin: 0 0 16px;
+    color: #bbb;
+  }
+
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 0 12px;
+  }
+
+  .topbar label {
+    font-size: 14px;
+    color: #ddd;
+  }
+
+  .topbar input[type="color"] {
+    width: 48px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .topbar button {
+    background: #222;
+    color: white;
+    border: 1px solid #444;
+    padding: 10px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+
+  .topbar button:hover {
+    background: #2d2d2d;
+  }
+
+  .info {
+    font-size: 14px;
+    color: #aaa;
+    margin-bottom: 12px;
+  }
+
+  #viewport {
+    width: 95vw;
+    height: 78vh;
+    margin: 0 auto 20px;
+    border: 2px solid #333;
+    background: #000;
+    overflow: hidden;
+    position: relative;
+    touch-action: none;
+    border-radius: 12px;
+  }
+
+  canvas {
+    display: block; image-rendering: pixelated;
+    transform-origin: top left;
+    cursor: crosshair;
+  }
 </style>
 </head>
-
 <body>
 
-<h1>Buy Your Pixel</h1>
-<p>Click anywhere to claim your pixel</p>
+  <h1>Buy Your Pixel</h1>
+  <p>Zoom, pan, pick a color, and claim your spot.</p>
 
-<canvas id="canvas" width="1000" height="1000"></canvas>
+  <div class="topbar">
+    <label>
+      Pick color:
+      <input type="color" id="colorPicker" value="#ff0000" />
+    </label>
+
+    <button id="zoomIn">Zoom +</button>
+    <button id="zoomOut">Zoom -</button>
+    <button id="resetView">Reset View</button>
+    <button id="toggleGrid">Toggle Grid</button>
+  </div>
+
+  <div class="info" id="infoText">
+    Scale: 12x | Drag to move | Tap/click to buy
+  </div>
+
+  <div id="viewport">
+    <canvas id="canvas" width="1000" height="1000"></canvas>
+  </div>
 
 <script>
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const canvas = document.getElementById("canvas");const ctx = canvas.getContext("2d");
+const viewport = document.getElementById("viewport");
+const colorPicker = document.getElementById("colorPicker");
+const infoText = document.getElementById("infoText");
 
-// bestehende Pixel laden
-fetch("/pixels")
-.then(res => res.json())
-.then(data => {
-    for (let key in data) {
-        const [x, y] = key.split(",");
-        ctx.fillStyle = "red";
-        ctx.fillRect(x, y, 1, 1);
+const zoomInBtn = document.getElementById("zoomIn");
+const zoomOutBtn = document.getElementById("zoomOut");
+const resetViewBtn = document.getElementById("resetView");
+const toggleGridBtn = document.getElementById("toggleGrid");
+
+const GRID_SIZE = 1000;
+let pixels = {};
+let scale = 12;
+let offsetX = 0;
+let offsetY = 0;
+let showGrid = true;
+
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let moved = false;
+
+function updateInfo() {
+  infoText.textContent = `Scale: ${scale.toFixed(1)}x | Drag to move | Tap/click to buy`;
+}
+
+function clampOffsets() {
+  const scaledWidth = GRID_SIZE * scale;
+  const scaledHeight = GRID_SIZE * scale;  const minX = Math.min(0, viewport.clientWidth - scaledWidth);
+  const minY = Math.min(0, viewport.clientHeight - scaledHeight);
+
+  if (offsetX > 0) offsetX = 0;
+  if (offsetY > 0) offsetY = 0;
+  if (offsetX < minX) offsetX = minX;
+  if (offsetY < minY) offsetY = minY;
+}
+
+function applyTransform() {
+  clampOffsets();
+  canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+  updateInfo();
+}
+
+function drawGrid() {
+  ctx.clearRect(0, 0, GRID_SIZE, GRID_SIZE);
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, GRID_SIZE, GRID_SIZE);
+
+  for (const key in pixels) {
+    const [x, y] = key.split(",").map(Number);
+    ctx.fillStyle = pixels[key].color || "#ff0000";
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  if (showGrid && scale >= 6) {
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 0.05;
+
+    for (let i = 0; i <= GRID_SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, GRID_SIZE);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(GRID_SIZE, i);
+      ctx.stroke();
     }
+  }
+}
+
+async function loadPixels() {
+  const res = await fetch("/pixels");
+  pixels = await res.json();
+  drawGrid();
+}
+
+function screenToPixel(clientX, clientY) {
+  const rect = viewport.getBoundingClientRect();
+  const x = Math.floor((clientX - rect.left - offsetX) / scale);
+  const y = Math.floor((clientY - rect.top - offsetY) / scale);
+  return { x, y };
+}
+
+async function buyPixel(x, y) {
+  if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) return;
+
+  const key = `${x},${y}`;
+  if (pixels[key]) {
+    const openLink = confirm("This pixel is already taken. Open its link?");
+    if (openLink) {
+      window.open(pixels[key].link, "_blank");
+    }
+    return;
+  }
+
+  const link = prompt(`Enter your link for pixel (${x}, ${y}):`);
+  if (!link) return;
+
+  const color = colorPicker.value;
+
+  const res = await fetch("/buy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ x, y, link, color })
+  });
+
+  if (res.ok) {
+    pixels[key] = { link, color };
+    drawGrid();
+  } else {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || "Could not buy pixel.");
+  }
+}
+
+viewport.addEventListener("mousedown", (e) => {
+  isDragging = true;
+  moved = false;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
 });
 
-// Klick Event
-canvas.addEventListener("click", async (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor(e.clientX - rect.left);
-    const y = Math.floor(e.clientY - rect.top);
+window.addEventListener("mousemove", (e) => {
+  if (!isDragging) return;
 
-    const link = prompt("Enter your link:");
-    if (!link) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
 
-    const res = await fetch("/buy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ x, y, link })
-    });
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+    moved = true;
+  }
 
-    if (res.ok) {
-        ctx.fillStyle = "red";
-        ctx.fillRect(x, y, 1, 1);
-    } else {
-        alert("Pixel already taken!");
-    }
+  offsetX += dx;
+  offsetY += dy;
+
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+
+  applyTransform();
 });
+
+window.addEventListener("mouseup", async (e) => {
+  if (!isDragging) return;
+  isDragging = false;
+
+  if (!moved) {
+    const { x, y } = screenToPixel(e.clientX, e.clientY);
+    buyPixel(x, y);
+  }
+});
+
+let touchStartDistance = null;
+let lastScale = scale;
+
+viewport.addEventListener("touchstart", (e) => {
+  if (e.touches.length === 1) {
+    isDragging = true;
+    moved = false;
+    dragStartX = e.touches[0].clientX;
+    dragStartY = e.touches[0].clientY;
+  }
+
+  if (e.touches.length === 2) {
+    isDragging = false;
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+    lastScale = scale;
+  }
+}, { passive: false });
+
+viewport.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+
+  if (e.touches.length === 1 && isDragging) {
+    const dx = e.touches[0].clientX - dragStartX;
+    const dy = e.touches[0].clientY - dragStartY;
+
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      moved = true;
+    }
+
+    offsetX += dx;
+    offsetY += dy;
+
+    dragStartX = e.touches[0].clientX;
+    dragStartY = e.touches[0].clientY;
+
+    applyTransform();
+  }
+
+  if (e.touches.length === 2 && touchStartDistance) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const newDistance = Math.sqrt(dx * dx + dy * dy);
+
+    scale = Math.min(40, Math.max(4, lastScale * (newDistance / touchStartDistance)));
+    applyTransform();
+    drawGrid();
+  }
+}, { passive: false });
+
+viewport.addEventListener("touchend", async (e) => {
+  if (e.touches.length === 0 && isDragging) {
+    isDragging = false;
+  }
+
+  if (!moved && e.changedTouches.length === 1) {
+    const touch = e.changedTouches[0];
+    const { x, y } = screenToPixel(touch.clientX, touch.clientY);
+    buyPixel(x, y);
+  }
+
+  if (e.touches.length < 2) {
+    touchStartDistance = null;
+    lastScale = scale;
+  }
+});
+
+viewport.addEventListener("wheel", (e) => {
+  e.preventDefault();
+
+  const zoomAmount = e.deltaY < 0 ? 1.15 : 0.87;
+  scale *= zoomAmount;
+  scale = Math.min(40, Math.max(4, scale));
+
+  applyTransform();
+  drawGrid();
+}, { passive: false });
+
+zoomInBtn.addEventListener("click", () => {
+  scale = Math.min(40, scale * 1.25);
+  applyTransform();
+  drawGrid();
+});
+
+zoomOutBtn.addEventListener("click", () => {
+  scale = Math.max(4, scale / 1.25);
+  applyTransform();
+  drawGrid();
+});
+
+resetViewBtn.addEventListener("click", () => {
+  scale = 12;
+  offsetX = 0;
+  offsetY = 0;
+  applyTransform();
+  drawGrid();
+});
+
+toggleGridBtn.addEventListener("click", () => {
+  showGrid = !showGrid;
+  drawGrid();
+});
+
+loadPixels();
+applyTransform();
 </script>
 
 </body>
