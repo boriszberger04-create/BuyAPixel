@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Buy a Pixel</title>
+<style>
+body {
+  background: #111;
+  color: white;
+  text-align: center;
+  font-family: Arial;
+}
+canvas {
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Buy Your Pixel</h1>
+<p>Click anywhere to claim your pixel</p>
+
+<canvas id="canvas" width="1000" height="1000"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// bestehende Pixel laden
+fetch("/pixels")
+.then(res => res.json())
+.then(data => {
+    for (let key in data) {
+        const [x, y] = key.split(",");
+        ctx.fillStyle = "red";
+        ctx.fillRect(x, y, 1, 1);
+    }
+});
+
+// Klick Event
+canvas.addEventListener("click", async (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor(e.clientX - rect.left);
+    const y = Math.floor(e.clientY - rect.top);
+
+    const link = prompt("Enter your link:");
+    if (!link) return;
+
+    const res = await fetch("/buy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x, y, link })
+    });
+
+    if (res.ok) {
+        ctx.fillStyle = "red";
+        ctx.fillRect(x, y, 1, 1);
+    } else {
+        alert("Pixel already taken!");
+    }
+});
+</script>
+
+</body>
+</html>
